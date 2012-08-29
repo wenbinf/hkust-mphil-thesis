@@ -1,0 +1,53 @@
+\documentclass[24pt]{beamer}
+
+\usepackage{ulem}
+\usepackage[center]{subfigure}
+\usepackage{color,graphicx}
+\usepackage{cancel}
+
+\usetheme{Copenhagen}
+\usefonttheme{professionalfonts}
+\mode<presentation> 
+\setbeamertemplate{footline}[page number]{}
+\setbeamerfont{title}{share=\itshape,family=\rmfamily}
+\title{Mars: Accelerating MapReduce on Graphics Processors}
+\author{Wenbin Fang \\ \texttt{wenbin@cse.ust.hk}}
+\institute{HKUST}
+\date{25 June, 2010}
+  
+\begin{document}
+
+%slide 1
+\begin{frame}
+\titlepage
+\end{frame}
+
+%slide 2
+\input{section/preface}
+
+%slide 3
+\begin{frame}
+\frametitle{Agenda}
+\tableofcontents
+\end{frame}
+
+\input{section/why}
+
+\input{section/design}
+
+\input{section/eval}
+
+\input{section/ref}
+
+\input{section/conclusion}
+
+\begin{frame}
+Thanks! Q\&A?
+
+ 
+http://www.cse.ust.hk/gpuqp/Mars.html
+\end{frame}
+
+\input{section/backup}
+
+\end{document}

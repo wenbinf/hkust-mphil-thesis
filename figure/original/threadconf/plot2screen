@@ -1,0 +1,31 @@
+set ylabel "Running Time (ms)"
+set xlabel "Data Size (MB)"
+set key left
+set xtic auto
+set ytic auto
+set pointsize 1.5
+#set terminal postscript portrait enhanced color
+set size 2.0, 1.0
+#set output "threadconf.eps"
+
+set style data histograms
+set style histogram cluster gap 1
+set style fill solid border -1
+set boxwidth 0.9
+
+#set label "96" at 40,200
+#set label "96" at 40,200
+#set label "96" at 40,200
+#set label "96" at 40,200
+#set label "96" at 40,200
+#set label "96" at 40,200
+
+plot "raw" \
+using 3:xtic(1) title "# of threads per block: 32", \
+'' u 5 title "# of threads per block: 64", \
+'' u 7 title "# of threads per block: 128", \
+'' u 9 title "# of threads per block: 256", \
+'' u 11 title "# of threads per block: 512", \
+'' u 14 title "# of threads per block: auto"
+
+pause -1

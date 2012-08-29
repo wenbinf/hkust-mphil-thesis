@@ -1,0 +1,15 @@
+\chapter{Conclusion}\label{sec-conclusion}
+Graphics processors have become an efficient accelerator for
+high-performance computing. This thesis proposes Mars, which
+harnesses the GPU computation power and high memory bandwidth to
+accelerate MapReduce frameworks. Mars is applicable to run on
+NVIDIA GPUs, AMD GPUs, multi-core CPUs, and Hadoop-based distributed systems. 
+%and can be easily ported to other parallel systems, due to its lock-free design and simple array data structure. 
+%In addition, Mars is flexible enough to support a variety of applications efficiently, because of the support of customized workflow. 
+Our empirical studies show that Mars
+improves the programmability of both the NVIDIA and the AMD GPUs,
+and \red{the GPU-CPU co-processing of Mars on an NVIDIA GTX280 GPU and an Intel quad-core CPU outperformed Phoenix, the state-of-the-art MapReduce on the multi-core CPU with a speedup of up to 72 times and 24 times on average.} Additionally, integrating Mars into Hadoop enabled GPU acceleration for a network of PCs.
+
+The code and documentation of Mars can be found at
+http://www.cse.ust.hk/gpuqp/.
+

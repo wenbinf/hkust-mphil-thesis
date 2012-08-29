@@ -1,0 +1,81 @@
+\chapter{Introduction}\label{sec-introduction}
+
+MapReduce is a successful paradigm~\cite{Dean2008}, originally proposed by Google,
+for the ease of distributed data processing on a large number of machines.
+In such a system, users specify two functions:
+(1) a {\em map} function to process an input key/value pair,
+and to generate a set of intermediate key/value pairs;
+(2) a {\em reduce} function to merge all intermediate key/value pairs associated with the same key.
+The system will automatically distribute and execute tasks on multiple machines~\cite{HADOOP, Dean2008}
+or multiple CPUs in a single machine~\cite{Ranger2007}.
+Thus, this paradigm reduces the programming complexity so that developers can easily
+exploit the parallelism in the underlying computing resources for complex tasks.
+Encouraged by the success of CPU-based MapReduce systems, in particular, Phoenix~\cite{Ranger2007},
+we develop Mars, a MapReduce system accelerated with graphics processors, or GPUs.
+
+GPUs can be regarded as massively parallel processors with an order of magnitude higher computation
+power (in terms of number of floating point operations per second) and memory bandwidth than CPUs~\cite{Ailamaki2006}.
+%Moreover, the performance of GPUs is improving at a rate higher than Moore's law for CPUs.
+\red{Moreover, the computational performance of GPUs is improving at a rate higher than that of CPUs.}
+However, it is a challenging task to program GPUs for general-purpose computing applications, including
+those that MapReduce users are familiar with. Specifically, GPUs are traditionally designed as
+special-purpose co-processors for dedicated graphics rendering. As such, GPU cores are SIMD
+(Single-Instruction-Multiple-Data), which discourages complex control flows. Furthermore, GPU cores are virtualized, and threads are managed by the hardware. Finally,
+GPUs manage their own on-board device memory and require programmers to explicitly
+transfer data between the GPU memory and the main memory.  Additionally, the architectural details
+of GPUs vary by vendors as well as by product releases, and programmer's access to these details is limited.
+All these factors make desirable a GPGPU (General Purpose Computation on GPUs) framework
+on which users can develop correct and efficient GPU programs easily.
+
+Recently, several GPGPU programming frameworks have been introduced, such as NVIDIA CUDA~\cite{CUDA}, and AMD Brook+~\cite{BROOKPLUS}.
+\red{These frameworks significantly improve the programmability of GPUs; nevertheless, their interfaces are vendor-specific and their hardware abstractions may be unsuitable for complex applications such as those running on MapReduce.
+Therefore, we propose Mars, a MapReduce framework to ease the programming of such applications on the GPU.} Furthermore, the MapReduce framework of Mars enables the integration of GPU-accelerated code to distributed environment, like Hadoop, with the least effort.
+Our Mars system can run on multi-core CPUs (MarsCPU), on CUDA-enabled NVIDIA GPUs (MarsCUDA) or Brook+-enabled AMD GPUs (MarsBrook), or on a combination of a multi-core CPU and a GPU on a single machine.
+We further integrate Mars into Hadoop~\cite{HADOOP}, an open-source CPU-based MapReduce system on a
+network of machines, which results in MarsHadoop, where each machine can utilize its GPU with MarsCUDA or MarsBrook
+in addition to its CPU with the original Hadoop. No matter what GPU and/or CPU Mars runs on, the API (Application
+Programming Interface) to the user is the same and is similar to that of existing CPU-based MapReduce systems.
+
+Easing up GPU programming for MapReduce applications is the main goal of our work. However, a higher-level
+abstraction for programming, specifically MapReduce, comes at a price of performance.
+In particular, we identify the following three technical challenges in implementing Mars on GPUs.
+%First, since MapReduce divides up a task by data, data skews are an inherent problem in utilizing
+First, since MapReduce divides up a task by data, load imbalance is an inherent problem in utilizing
+the massive thread parallelism on the GPU, especially because GPU threads are managed by the hardware.
+\red{Second, GPUs lack efficient global synchronization mechanisms. Threads in Map or Reduce tasks are likely to have write conflicts on the output buffer.
+%Although NVIDIA GPUs provide atomic operations on the global memory, the performance of these atomic operations is so poor that using them performs worse than using the CPU \cite{ATOMIC}. Therefore, the overhead of atomic operations harm the scalability of massive GPU threads.
+While atomic operations are enabled in recent GPUs, the overhead of atomic operations would harm the scalability of massive GPU threads \cite{ATOMIC}. We consider a lock free scheme to minimize the synchronization overhead among GPU threads.}
+%It is desirable to implement a extremely low-overhead thread synchronization mechanism.
+%Therefore, it is mandatory to implement thread synchronization, and the synchronization overhead must be low so as to scale to the massive number of GPU threads.
+Third, MapReduce applications are in general data-intensive and their result sizes are data-dependent. These two characteristics pose the following requirements on programming the GPU: (a) sufficient  thread parallelism to hide the high latency and to utilize the high bandwidth of the device memory; (b) pre-allocation of output buffers in the device memory for bulk DMA transfers, as GPU memory allocation is done through the CPU before the GPU program starts.
+
+With these challenges in mind, we develop Mars for GPUs of two most
+common programming interfaces - CUDA and Brook+. We focus on
+MarsCUDA, than MarsBrook, because in our implementation
+and evaluation, CUDA was more flexible and had a higher performance than Brook+
+for MapReduce applications.
+
+In MarsCUDA, the massive thread parallelism on the GPU is well utilized
+as each thread is automatically assigned a key/value pair to work on.
+In {\em Map}, the system evenly distributes key/value
+pairs to each thread. In {\em Reduce}, we develop a simple but effective
+\red{skew handling scheme to re-distribute data evenly across all reduce tasks. }To avoid write conflicts between
+threads, we adopt a lock-free scheme that guarantees the
+correctness of parallel execution with little synchronization
+overhead. 
+
+We extend our general design of Mars from a GPU-only MapReduce framework to a MapReduce system with GPU acceleration enabled. With this extension, Mars components can work stand-alone on a single platform, e.g., MarsCUDA on a CUDA-enabled GPU or MarsCPU on a multi-core CPU, as well as to work together to utilize multiple processors, e.g., a CPU and a GPU on a single machine.
+We also integrate Mars into Hadoop to enable GPU-acceleration for individual machines in a distributed environment.
+
+\red{We evaluated the performance of Mars in comparison with its CPU-based counterparts and the native implementation without MapReduce. Our results demonstrate the effectiveness of our  GPU-oriented  optimization  strategies. On average, our MarsCUDA is 22 times faster than the CPU-based MapReduce, Phoenix~\cite{Ranger2007}, and is less than 3 times slower than the hand-tuned native CUDA implementation. Additionally, the applications developed with Mars had a code size reduction up to seven times, compared with hand-tuned native CUDA code.}
+
+\textbf{Organization:} The remainder of the thesis is organized as
+follows. We give a brief overview of GPUs, and review prior work on GPGPU and
+MapReduce in Chapter~\ref{sec-preliminaries}. We present the design
+and implementation details of Mars in Chapter~\ref{sec-design} and
+Chapter~\ref{sec-implement} respectively. We present the extension
+to multiple machines in
+Chapter~\ref{sec-beyond}. In Chapter~\ref{sec-eval}, we present our
+experimental results. Finally, we conclude in Chapter~\ref{sec-conclusion}.
+
+\newpage

@@ -1,0 +1,336 @@
+Slide 1 : Preface what's mars [2:00]
+
+This thesis is about a system, called Mars.
+
+First, it is a MapReduce programming system. Programmers write map functions and reduce functions to express their algorithms by using a few APIs provided by Mars.
+
+Mars is also a parallel processing system, accelerated by graphics processors, or GPUs. It automatically parallelizes tasks on graphics processors, so that it hides the hardware details from programmers and well utilizes the hardware resources on GPUs.
+
+The Mars system consists of some modules. The module MarsCUDA runs on an NVIDIA GPU, which is based on NVIDIA CUDA programming library.
+The module MarsBrook runs on an AMD GPU, and is based on AMD Brook+ programming library.
+MarsCPU is the module that runs on a multicore CPU, implemented by pthreads library.
+The above modules can run independently, or can cooperate with each other. We develop a simple GPU-CPU coprocessing scheme.
+We also integrate Mars into Hadoop, an open source distributed implementation of MapReduce, which results in MarsHadoop, where each computation node in Hadoop can utilize its GPU with MarsCUDA or MarsBrook.
+
+No matter what module of Mars is used, the programming interface to the user is the same and similar to that of existing CPU-based MapReduce systems.
+
+==========================
+Slide 2 : Preface result [0:45] [2:45]
+
+By using Mars, programming on GPUs can be easier, especially for those applications suitable to be expressed by MapReduce model. 
+We implemented 6 applications in both Mars and the underly libraries, like CUDA and pthreads. 
+There is up to 7 times source code size saving by using Mars.
+
+According to our performance evaluation, Mars on the GPU has an order of magnitude performance speedup over a state-of-the-art CPU-based  MapReduce system. 
+
+==========================
+Slide 3: Agenda [0:20] [3:05]
+
+In the remaining time, I'll briefly survey some research work on general purpose gpu programming, as well as MapReduce. Then, I am going to introduce the design and implementation of Mars. Next, I'll show the evaluation result on Mars. Finally, I conclude this talk. 
+
+==========================
+Slide 4: GPU hardware trend [0:30] [3:35]
+
+Graphics processors, or GPUs have evolved into a highly parallel, multithreaded, manycore processors, driven by large market demand for realtime, high definition 3D graphics. 
+
+This figure shows that NVIDIA GPUs outperform CPUs by a factor of 10, in terms of floating point operation per second. The gap keeps growing. 
+
+==========================
+Slide 5: GPU chip [0:30] [4:05]
+
+The reason for the computational gap between GPU and CPU is, the GPU is specialized for compute-intensive graphics renderings, and compared with the CPU, the GPU devotes much more transistors to computation components, rather than flow control and caching.
+So with the same size of chip, the GPU is good at computation, but it is poor in branching and caching. 
+
+==========================
+Slide 6: GPU hardware trend 2 [0:25] [4:30]
+
+On the same machine, the GPU does not share the same main memory with the CPU. 
+Instead, the GPU has its own device memory, which also has an order of magnitude higher bandwidth than the main memory for the CPU. 
+
+==========================
+Slide 7: General purpose computing [1:00] [5:30]
+
+Nowadays, GPU vendors model the GPU as a many-core processor that has a set of SIMD multiprocessors, and a device memory. 
+GPUs rely on the CPU to allocate buffer on device memory, to transfer data from main memory to device memory by PCI-E bus, and to initiate the GPU computation. 
+So the GPU is considered as a co-processor to the CPU. 
+
+The programmability of the GPU has been improved. In addition to using graphics-specific language like opengl and directX, we can use general purpose programming languages. For example, CUDA from NVIDIA, Brook+ from AMD, and the standardized OpenCL.
+
+Compared with these programming languages, Mars stands at a higher level of abstraction, easing up GPU programming for MapReduce applications.  
+
+==========================
+Slide 9: App [0:40] [6:10]
+
+With the improvement of programmability on GPUs, there are more and more applications other than graphics rendering, utilizing GPUs to accelerate their performance.  
+
+In practice, data parallel programs are better off harnessing the computation power on GPU's SIMD multiprocessor, where each GPU thread executes the same instructions, without or with a few branch divergences.
+
+==========================
+Slide 10: MapReduce [0:30] [6:40]
+
+MapReduce is an ideal programming model for data parallel tasks. 
+
+It was proposed by google. 
+Programmers specify a map function that processes a key/value pair to generate a set of intermediate key/value pair, and a reduce function that merges all intermediate values associated with the same intermediate key.
+
+==========================
+Slide 11: workflow [0:40] [7:20]
+
+This is the basic MapReduce workflow. 
+
+The runtime system automatically parallelize Map tasks and Reduce task on parallel processors, possibly on thousands of machines, or on a multicore CPU. 
+
+Each Map task independently executes the same map function written by the programmer, similarly to reduce task. 
+During the whole workflow, communication between tasks only happens here -- to group intermediate values by key. 
+So, MapReduce is really a good programming model for data parallel tasks. 
+
+==========================
+Slide 12: implementations [1:30] [8:50]
+
+There are various MapReduce implementations on different platforms. 
+
+Distributed environment. 
+
+Phoenix is a MapReduce implementation on multicore CPUs. We mainly use Phoenix as a comparison in this work. 
+
+There are implementations for Cell processor and FPGA.
+
+There are also two other implementations parallel to our work. 
+One is from Berkerley. This implementation requires programmers to be aware of GPUs architecture, like memory hierarchy. In comparison, Mars does not.
+
+The other implementation is from intel, which is targeted on intel's GPUs. And Mars is a general design across different many-core processors.  
+
+==========================
+Slide 13: Goals and Challenges [0:35] [9:25]
+
+The design for Mars aims at three goals:
+1, Ease of programming. This goal encourages programmers to use the GPU for their tasks.
+2, Flexibility. The design should be applicable to various multi-/many-core processors.  
+3, High performance. The overall performance should be accelerated by the GPU effectively.  
+
+We identify that the biggest challenge in designing Mars is the result output on GPUs. 
+There are two problems.
+One, Threads in Map or Reduce tasks are likely to have write conflicts on the output buffer. GPUs lack efficient global synchronization mechanisms.
+Two, the size of output data is unknown in advance.
+GPUs are not able to allocate or reallocate buffer on the fly, instead, GPUs rely on the CPU to allocate buffer. 
+
+To solve the result output problem, we adopt a lock-free scheme, and I will detail it later. 
+
+==========================
+Slide 14: workflow
+
+Let's see the workflow of Mars. 
+
+The Mars scheduler runs on the CPU, and schedules tasks to the GPU. Mars has three stages, Map, Group, and Reduce
+
+Before the Map stage, Mars preprocesses on the CPU the input data from disk, transforming the input data to key/value pairs (input records) in main memory.
+
+In the Map stage, Map Split dispatches input records to GPU threads such that the workload for all threads is even. Each GPU thread executes a Map task. 
+I'll explain what is MapCount, and prefix sum in the next slide. 
+
+In the Group stage, both sort-based and hash-based approaches are available for grouping records by key. However, we adopt the sort-based, because some applications require to sort all output records, and the hash-based approach has to perform additional sort within each hash bucket.
+
+The reduce stage works similar to the Map stage, except that each reduce task processes a group of key/value pairs with the same key, instead of only one key/value pair. 
+
+Mars allows programmers to customize the workflow of their applications. We provide three candidate workflows: Map Only workflow, Map and Group workflow, and the complete Map-Group-Reduce workflow. 
+Because usually applications need a Map to transform input records, and a Group to prepare for the intermediate records to feed to Reduce, we exclude the other workflow configurations that skip either Map or Group in the presence of Reduce.
+
+==========================
+Slide 14: data structure
+
+We call a key/value pair as a record. 
+The Map stage takes input records, and outputs intermediate records, which are in turn the input of the Group stage. The output of the Group stage is the input of the Reduce stage, and Reduce produces final output records.
+
+Since the GPU does not support dynamic memory allocation on the device memory during the execution of the GPU code, this limitation rules out dynamic data structures such as queues and linked lists, as used in other MapReduce implementations. Instead, we use plain arrays as the main data structure in Mars.
+
+Either input records, intermediate records or output records is stored in three arrays, i.e., the key array, the value array and the directory index array.
+
+The directory index consists of an entry of key size, key offset, value size, value offset for each key/value pair.
+Variable-sized types, such as strings, are supported with the directory index.
+
+Since the sets of input records, intermediate records and output records are all in the three-array structure uniformly, chained MapReduce is supported gracefully in Mars.  
+
+
+==========================
+Slide 15: lock free
+
+As I mentioned, the result output is the biggest challenge in designing mars. There are two main problems for result output:
+One, write conflicts occur when multiple threads write results to the shared output array
+Two, the sizes of the output from the Map and the Reduce stages are unknown. 
+We address these two problems by a lock-free scheme. 
+
+Since the output scheme for the Map stage is similar to that for the Reduce stage, we present the scheme for the Map stage only.
+
+In addition to write a map function, the programmer has to write a MapCount function, which is simply to output the output key size and value size for a map task.  
+Mars computes a prefix sum on these sizes and produces an array of write locations in the output array for a map task to write. Through these prefix sums, we also know total size of the arrays for the intermediate results. Next, Mars allocates arrays in the device memory with the exact sizes for storing the intermediate results.
+
+Finally, each Map invocation on a thread outputs the intermediate key/value pairs to the output array. Since each Map has its deterministic and non-overlapping positions to write to, the write conflicts are avoided.
+
+==========================
+Slide 16: example
+
+There are three map tasks, and each of them is going to output a string. 
+
+First, the mapcount function outputs the string size. 
+Then, based on the sizes, we do a prefix sum, which is to sum up all numbers before the position. 
+In this example, at the last position, we get the sum of all elements before it, which is 9 plus 4, or 13. We also get the sum of all elements in the size array 19, which means the size of the output buffer should be 19. 
+
+Next, allocate a buffer of size 19. Finally, we perform the Map tasks. 
+
+==========================
+Slide 17: building blocks
+
+We implemented MarsCUDA using NVIDIA CUDA. We used the GPU Prefix Sum routine from CUDPP [3] to implement the lock-free scheme, and the GPU Bitonic Sort routine for the Group phase.
+
+==========================
+Slide 18: Memory optimization 1
+
+CUDA exposes sufficient hardware details of NVIDIA GPUs, so that we can apply some optimizations in MarsCUDA runtime.
+
+CUDA is able to coalesce simultaneous consecutive device memory accesses by threads in a half-warp into a single memory transaction, which significantly reduces the number of device memory accesses. Warp is an NVIDIA term for a group of 32 threads for scheduling. We implement the access to the directory index arrays as coalesced.
+
+NVIDIA GPUs provide the programmable on-chip local memory (or shared memory [26]), for sharing data among threads running on the same multiprocessor. 
+In Mars, data sharing or communication only happens in the Group stage. MarsCUDA runtime automatically uses a GPU-based bitonic sort to exploit this memory hierarchy in the Group stage. Users who are aware of the GPU memory hierarchy and need such data sharing can exploit the local memory in implementing the Map (or Reduce) function.
+
+==========================
+Slide 19: Memory optimization 2
+
+Data accesses in the GPU device memory should be aligned to make sure the correctness and achieve high memory bandwidth. Fortunately, GPUs support built-in vector types, including float4 and int4. The alignment requirement is automatically fulfilled for built-in types. In addition, the GPU is able to issue a single load instruction to read data of builtin vector type, of size up to 16 bytes. Compared with reading an array one float or int at a time, the number of compiler-generated instructions for reading float4 or int4 is greatly reduced and the overall performance is improved.
+
+CUDA supports page-locked host memory, which prevents the operating system from paging the locked memory buffer, yielding high transfer bandwidth between the device memory and the host memory. The MarsCUDA runtime allocates the page-locked host memory buffer, in order to reduce the data transfer overhead. Our test demonstrated that page-locked memory can double the memory transfer rate through PCI-E bus than pageable memory.
+
+==========================
+Slide 20: Task distribution
+
+A GPU thread is lightweight, we utilize the parallelism by assigning the tasks to a large number of threads. 
+Specifically, one GPU thread executes one map task or one reduce task. 
+
+If the reduce task is communicative and associative, for example, integer addition, 
+then we can apply parallel reduction for load-balanced reduce. 
+
+
+==========================
+Slide 21: MarsCPU
+
+We implement MarsCPU using the pthreads library on linux for multi-threading. We implement a CPU multi-threaded parallel mergesort for the Group stage.
+
+Instead of adopting lock-based task scheduling as in Phoenix,MarsCPU inherits the lock-free design of GPU-based Mars, which we expect to scale to hundreds of cores for future many-core CPUs. 
+
+MarsCPU deploys CPU threads to perform Map and Reduce tasks. If there are N Map (or Reduce) tasks, and T CPU threads, where N is usually much larger than T, then a thread processes N/T tasks. 
+
+==========================
+Slide 22: Co-processing
+
+There are also mainly three stages, Map, Group and Reduce. In theMap stage, the scheduler divides the input data into multiple chunks. The number of chunks is equal to the total number of CPUs and GPUs in the machine.  The chunk sizes are determined based on the performance comparison between the CPU and the GPU.
+
+Suppose the speedup of the GPU worker over the CPU worker is S, where the speedup is defined to be the ratio of the execution time on the CPU to that on the GPU for the same amount of input data. Given the total input size of I bytes, we assign data chunks of SI/1+S and I/1+S bytes to the GPU and the CPU workers, respectively. The speedup S can be obtained by either calibration or predictive model from other research work.
+
+==========================
+Slide 23: MarsHadoop
+
+We integrate Mars into a CPU-based distributed MapReduce system, specifically Hadoop in our implementation.
+
+This integration benefits from both worlds: Hadoop utilizes CPUs on multiple machines and provides fault-tolerance and other features of a distributed system; Mars utilizes the GPU to accelerate local computation.
+
+We use the Hadoop Streaming technology  to integrate Mars into Hadoop. Hadoop Streaming enables the developers to use their own custom Map or Reduce implementation in Hadoop.
+
+This figure illustrates the workflow of MarsHadoop. A Map Worker/Reduce Worker in MarsHadoop is the same as a Map Worker/Reduce Worker shown in previous figure; in other words, it can be from MarsCUDA, MarsBrook, or MarsCPU, depending on the underlying processor. Node 1 simultaneously runs two Map Workers, on a GPU and a CPU respectively.
+
+
+==========================
+Slide: Experimental setup
+
+Our experiments were performed on three PCs, A, B and C.Both PCs A and B run 32-bit CentOS Linux, with NVIDIA GPUs. PC C runs 32-bit windows xp, with AMD GPU.
+We present the results on the NVIDIA GPU in detail, and skip the results on the AMD GPU.
+
+==========================
+Slide: Application
+
+We have implemented the following six real-world applications on various platforms for evaluating the MapReduce framework. 
+
+In particular, the workflow of these applications differ: SM and MM only have the Map stage, BS, SS and PCA have Map and Group stages, and MC has all the three stages. PCA has a chain of multiple MapReduce procedures, whereas other applications have only one MapReduce invocation.
+
+==========================
+Slide: Code size
+
+This table shows the comparison of user code size, for implementing the micro-benchmark with MarsCUDA, MarsCPU, Phoenix, and CUDA. By design, the code sizes with MarsCUDA are the same as those with MarsCPU. In general, the applications with MarsCPU have a similar code size to those with Phoenix. 
+The user code size of MarsCUDA is up to 7 times smaller than that of the native implementation with CUDA, which demonstrates the ease of GPU programming using Mars.
+
+==========================
+Slide: MarsCPU vs Phoenix
+
+We first compare the performance between MarsCPU and Phoenix. 
+The speedup is defined as the running time on phoenix divided by the running time on MarsCPU.
+
+The overall performance of MarsCPU is generally better than that of Phoenix, achieving a speedup of up to 25.9x. Applications written using Phoenix always have a Reduce stage, whereas using ours they may not have.
+
+By design, phoenix has some overheads. First, lock-based synchronization is needed.
+Second, the phoenix runtime adjusts output buffer size on the fly.
+Third, phoenix performs intertion sort on static arry, so it performs frequent memmove(). This overhead is obvious in the application BS and SS., where they require to rank several millions of output records.
+
+==========================
+Slide: MarsCUDA vs MarsCPU
+
+This figure shows the speedup of MarsCUDA over MarsCPU, for the Map stage and Reduce stage. 
+
+The whole mapreduce would contain a preprocess stage, a map stage, a group stage, and reduce stage. In this experiment, we just include two of them. 
+
+With the GPU acceleration, MarsCUDA achieves up to 40x speedup over MarsCPU.
+
+==========================
+Slide: MarsCUDA vs MarsCPU
+
+However, when considering the whole mapreduce process, MarsCUDA has limited speedup over MarsCPU. 
+
+==========================
+Slide: breakdown
+
+In order to figure out the source of slowdown in overall speedup, we further investigate the time breakdown of each application for both MarsCUDA and MarsCPU.
+
+We divide the total execution time into four components, including the time for 1) preprocessing input data including PCI-E I/O, 2) the Map stage (Map), 3) the Group stage (Group), and 4) the Reduce stage (Reduce). 
+
+MarsCUDA generally has a larger portion of preprocess time, involving key-val pair preparation and PCI-E I/O. 
+
+==========================
+Slide: Amdahl's law
+
+We use Amdahl's law to explain this speedup involving parallel and sequential executions.
+
+Take string match for example. Although the GPU accelerates the Map phase by 20 times, the Map only takes up some 25% in MarsCPU. According to Amdahl's law, the theoretical speedup of MarsCUDA over MarsCPU is at most 1.3. Our measurement is close to this theoretical speedup.
+
+==========================
+Slide: coprocessing
+
+We used MarsCUDA and MarsCPU as two components in the co-processing. This figure shows the performance speedup of the GPU/CPU co-processing module over MarsCUDA, MarsCPU, and Phoenix, on the large dataset. Overall, co-processing utilizes the computation power of both the CPU and the GPU, and yields a considerable performance improvement over using MarsCPU or Phoenix on a CPU. However, the speedup of using co-processing over using standalone MarsCUDA is limited.
+
+The theoretical speeup of coprocessing over MarsCUDA can be calculated by S+1/S, where S is the speedup of MarsCUDA over MarsCPU. The larger S is, the smaller this speedup is. 
+
+==========================
+Slide: marshadoop
+
+We experimented MM on MarsHadoop. We configured Hadoop on PC A and PC B: PC A as the master node, while PC A itself and PC B as slave nodes.
+
+The left figure shows the performance speedup of MarsHadoop over the native Hadoop implementation on MM. 
+As the matrix size varied, MarsHadoop is up to 2.8 times faster than the native Hadoop implementation. 
+We further examine the time breakdown in the slave node, and the results
+are shown in the right figure. As the matrix size increases, the ratio for the computation time grows, indicating that Mars starts to help. The disk I/O is mainly due to the extra I/O caused by Hadoop streaming.
+
+==========================
+Slide: conclusion
+
+This thesis proposes Mars, which harnesses the GPU computation power and high memory bandwidth to accelerate MapReduce frameworks. Mars is applicable to run on NVIDIA GPUs, AMD GPUs, multi-core CPUs, and Hadoop-based distributed systems. 
+
+Our empirical studies show that Mars improves the programmability of GPUs, and the GPU-accelerated module of mars outperforms phoenix, the state of the art mapreduce on the multicore cpu with an order of magnitude speedup. 
+
+==========================
+Backup Slide 2: Why high memory bandwidth
+
+Memory bandwidth is positively propotional to memory clock rate and memory bus width. 
+Compared with main memory for the CPU, the GPU device memory has a higher memory clock rate and memory bus width.
+
+Why such design?
+CPU uses cache to improve memory performance. GPU doesn't rely on caching. 
+As we just saw in the previous slide, GPU has small on-chip cache. 
+The GPU workload is mainly 3D rendering, to process large dataset of polygons and textures. Such workload is too large to fit into the small cache. 
+The only way for the GPU to improve memory bandwidth is to have high memory clock and wide memory bus. 
+The GPU device memory is more expensive than main memory for the CPU. 
